@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+ENV/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+
+# Environment files
+.env
+.env.local
+
+# Data, models and outputs (do NOT commit)
+dataset/
+predicted/
+predicted/predictions.csv
+best_arthritis_classifier.pth
