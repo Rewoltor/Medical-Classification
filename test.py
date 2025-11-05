@@ -1,8 +1,3 @@
-# PROMPT: Create a PyTorch script to TEST the trained classifier.
-# It must load the saved model from 'best_arthritis_classifier.pth'.
-# It must use the './dataset/auto_test' folder for evaluation.
-# It must print the final Accuracy, Precision, Recall, and F1-Score.
-
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -15,7 +10,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 # --- 1. Define Constants and Configuration ---
 
 TEST_DIR = "./dataset/test" # The final, unseen test set
-MODEL_PATH = "./best_arthritis_classifier.pth"
+MODEL_PATH = "./arthritis_classifier.pth"
 BATCH_SIZE = 32
 INPUT_SIZE = 224
 

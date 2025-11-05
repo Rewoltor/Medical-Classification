@@ -1,10 +1,3 @@
-"""
-Batch inference + Grad-CAM for all images under TEST_DIR.
-
-Writes per-image Grad-CAM overlays into OUTPUT_DIR (preserving subfolders)
-and a CSV file with predictions at OUTPUT_DIR/predictions.csv.
-"""
-
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
@@ -17,7 +10,7 @@ import csv
 from pathlib import Path
 
 # --- Configuration ---
-MODEL_PATH = "./best_arthritis_classifier.pth"
+MODEL_PATH = "./arthritis_classifier.pth"
 TEST_DIR = "./dataset/test"
 OUTPUT_DIR = "./predicted"
 COMMON_EXTS = ("*.png", "*.jpg", "*.jpeg", "*.bmp")

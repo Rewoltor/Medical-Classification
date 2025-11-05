@@ -1,8 +1,3 @@
-# MODIFIED PROMPT: PyTorch script for TRAIN and VALIDATION.
-# Replicates the DANNY paper's setup by limiting the TRAINING set to 600 images.
-# Uses './dataset/train' for training and './dataset/val' for validation.
-# Retains all previous performance fixes (Learning Rates, Unfrozen Layers, MPS fix).
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -19,9 +14,9 @@ import random # <-- 1. IMPORTED RANDOM
 # Configuration retained from successful fine-tuning attempt
 LEARNING_RATE_NEW_LAYER = 0.01    
 LEARNING_RATE_FINE_TUNE = 0.001   
-BATCH_SIZE = 32
-NUM_EPOCHS = 40 # You may need to run this for 20-30 epochs on few images
-MODEL_SAVE_PATH = "./best_arthritis_classifier.pth" 
+BATCH_SIZE = 300
+NUM_EPOCHS = 5 # You may need to run this for 20-30 epochs on few images
+MODEL_SAVE_PATH = "./arthritis_classifier.pth" 
 
 # **MODIFICATION 1: Updated Data Paths**
 TRAIN_DIR = "./dataset/train"
