@@ -33,4 +33,4 @@ ENV/
 dataset/
 predicted/
 predicted/predictions.csv
-best_arthritis_classifier.pth
+arthritis_classifier.pth
