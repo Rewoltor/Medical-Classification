@@ -7,18 +7,17 @@ from PIL import Image
 import os
 import glob
 import numpy as np
-import random # <-- 1. IMPORTED RANDOM
+import random
+import matplotlib.pyplot as plt
 
-# --- 1. Define Constants and Configuration ---
-
-# Configuration retained from successful fine-tuning attempt
+# Configuration from previous paper
 LEARNING_RATE_NEW_LAYER = 0.01    
 LEARNING_RATE_FINE_TUNE = 0.001   
-BATCH_SIZE = 300
-NUM_EPOCHS = 5 # You may need to run this for 20-30 epochs on few images
+BATCH_SIZE = 32
+NUM_EPOCHS = 6 # maybe 20-30 epocs on few images
 MODEL_SAVE_PATH = "./arthritis_classifier.pth" 
 
-# **MODIFICATION 1: Updated Data Paths**
+# 1: Updated Data Paths**
 TRAIN_DIR = "./dataset/train"
 VAL_DIR = "./dataset/val"         # Using 'val' for validation
 INPUT_SIZE = 224
@@ -147,11 +146,20 @@ optimizer = optim.Adam([
 
 best_val_loss = float('inf')
 
+# History for training visualization
+history = {
+    'loss': [],
+    'val_loss': [],
+    'val_acc': [],
+    'train_acc': []
+}
+
 print("Starting training...")
 for epoch in range(NUM_EPOCHS):
     # --- Training Phase ---
     model.train()  
     running_loss = 0.0
+    running_corrects = 0
     
     for inputs, labels in train_loader:
         inputs, labels = inputs.to(device), labels.to(device)
@@ -164,8 +172,12 @@ for epoch in range(NUM_EPOCHS):
         optimizer.step()
         
         running_loss += loss.item() * inputs.size(0)
+        # compute training accuracy for this batch
+        preds = torch.round(torch.sigmoid(outputs))
+        running_corrects += torch.sum(preds == labels.data)
     
     epoch_loss = running_loss / len(train_dataset)
+    epoch_train_acc = running_corrects.float() / len(train_dataset)
     
     # --- Validation Phase ---
     model.eval()  
@@ -187,7 +199,12 @@ for epoch in range(NUM_EPOCHS):
     epoch_val_loss = val_loss / len(val_dataset)
     epoch_val_acc = val_corrects.float() / len(val_dataset) 
     
-    print(f"Epoch {epoch+1}/{NUM_EPOCHS} | Train Loss: {epoch_loss:.4f} | Val Loss: {epoch_val_loss:.4f} | Val Acc: {epoch_val_acc:.4f}")
+    print(f"Epoch {epoch+1}/{NUM_EPOCHS} | Train Loss: {epoch_loss:.4f} | Train Acc: {epoch_train_acc:.4f} | Val Loss: {epoch_val_loss:.4f} | Val Acc: {epoch_val_acc:.4f}")
+    # record history for visualization
+    history['loss'].append(epoch_loss)
+    history['val_loss'].append(epoch_val_loss)
+    history['val_acc'].append(epoch_val_acc.item())
+    history['train_acc'].append(epoch_train_acc.item())
     
     # --- Save the Best Model ---
     if epoch_val_loss < best_val_loss:
@@ -196,3 +213,19 @@ for epoch in range(NUM_EPOCHS):
         print(f"  -> Validation loss improved. Model saved to {MODEL_SAVE_PATH}")
 
 print("Finished training.")
+
+# --- Evaluation visualization ---
+try:
+    plt.figure(figsize=(6, 4), dpi=160)
+    plt.plot(history['loss'], label='train')
+    plt.plot(history['val_loss'], label='test')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Loss')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig('training_history.png')
+    print('Saved training history plot to training_history.png')
+    plt.show()
+except Exception as e:
+    print('Could not create training plot:', e)
