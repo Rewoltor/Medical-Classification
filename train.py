@@ -9,18 +9,23 @@ import glob
 import numpy as np
 import random
 import matplotlib.pyplot as plt
+import csv
+import datetime
 
 # Configuration from previous paper
 LEARNING_RATE_NEW_LAYER = 0.01    
 LEARNING_RATE_FINE_TUNE = 0.001   
 BATCH_SIZE = 32
-NUM_EPOCHS = 6 # maybe 20-30 epocs on few images
-MODEL_SAVE_PATH = "./arthritis_classifier.pth" 
-
-# 1: Updated Data Paths**
-TRAIN_DIR = "./dataset/train"
-VAL_DIR = "./dataset/val"         # Using 'val' for validation
+NUM_EPOCHS = 10 # maybe 20-30 epocs on few images
 INPUT_SIZE = 224
+TRAIN_LIMIT = 1000              # max training samples used (set None to disable)
+NUM_WORKERS = 0                # DataLoader workers
+RANDOM_SEED = 42               # seed for reproducible shuffling
+
+TRAIN_DIR = "./dataset/train"
+VAL_DIR = "./dataset/val"
+MODEL_SAVE_PATH = "./arthritis_classifier.pth" 
+EVAL_DIR = "./eval"
 
 # --- 2. Set up the 'mps' Device ---
 
@@ -30,6 +35,12 @@ if not torch.backends.mps.is_available():
 else:
     print("MPS is available. Using M1 GPU.")
     device = torch.device("mps")
+
+# Set random seeds for reproducibility (where applicable)
+if RANDOM_SEED is not None:
+    random.seed(RANDOM_SEED)
+    np.random.seed(RANDOM_SEED)
+    torch.manual_seed(RANDOM_SEED)
 
 # --- 3. Custom Dataset Class (Modified to limit training data) ---
 
@@ -70,10 +81,10 @@ class ArthritisDataset(Dataset):
         self.file_paths = list(self.file_paths)
         self.labels = list(self.labels)
 
-        # Apply 600 image limit *only* to the training set
-        limit = 400
+        # Apply train limit (TRAIN_LIMIT) only to the training set
+        limit = TRAIN_LIMIT
         # Check if 'train' is in the directory path (to not limit 'val' set)
-        if "train" in root_dir and len(self.file_paths) > limit:
+        if limit is not None and "train" in root_dir and len(self.file_paths) > limit:
             self.file_paths = self.file_paths[:limit]
             self.labels = self.labels[:limit]
             print(f"  -> Dataset at {root_dir} randomly limited to {limit} images.")
@@ -112,8 +123,8 @@ data_transforms = {
 train_dataset = ArthritisDataset(root_dir=TRAIN_DIR, transform=data_transforms['train'])
 val_dataset = ArthritisDataset(root_dir=VAL_DIR, transform=data_transforms['val']) 
 
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
-val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0) 
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
+val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS) 
 
 print(f"Data loaded: {len(train_dataset)} train images, {len(val_dataset)} validation images.") # This will now show 600 train images
 
@@ -214,18 +225,104 @@ for epoch in range(NUM_EPOCHS):
 
 print("Finished training.")
 
-# --- Evaluation visualization ---
+# --- Evaluation visualization and saving to eval/ ---
 try:
-    plt.figure(figsize=(6, 4), dpi=160)
-    plt.plot(history['loss'], label='train')
-    plt.plot(history['val_loss'], label='test')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training and Validation Loss')
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig('training_history.png')
-    print('Saved training history plot to training_history.png')
+    eval_dir = EVAL_DIR
+    os.makedirs(eval_dir, exist_ok=True)
+
+    # determine next numeric run folder (look for numeric subdirectories)
+    existing = os.listdir(eval_dir)
+    max_idx = 0
+    for fn in existing:
+        full = os.path.join(eval_dir, fn)
+        if not os.path.isdir(full):
+            continue
+        try:
+            idx = int(fn)
+            if idx > max_idx:
+                max_idx = idx
+        except Exception:
+            continue
+    next_idx = max_idx + 1
+    run_dir = os.path.join(eval_dir, str(next_idx))
+    os.makedirs(run_dir, exist_ok=True)
+
+    # Create a combined figure: loss and accuracy
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), dpi=160)
+    ax1.plot(history['loss'], label='train')
+    ax1.plot(history['val_loss'], label='val')
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('Loss')
+    ax1.set_title('Training and Validation Loss')
+    ax1.legend()
+
+    ax2.plot(history['train_acc'], label='train_acc')
+    ax2.plot(history['val_acc'], label='val_acc')
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('Accuracy')
+    ax2.set_title('Training and Validation Accuracy')
+    ax2.legend()
+
+    # Metadata to display and save
+    metadata = {
+        'timestamp': datetime.datetime.now().isoformat(),
+        'batch_size': BATCH_SIZE,
+        'num_epochs': NUM_EPOCHS,
+        'lr_new_layer': LEARNING_RATE_NEW_LAYER,
+        'lr_fine_tune': LEARNING_RATE_FINE_TUNE,
+        'input_size': INPUT_SIZE,
+        'train_limit': TRAIN_LIMIT,
+        'model_save_path': MODEL_SAVE_PATH,
+        'device': str(device),
+        'train_samples': len(train_dataset),
+        'val_samples': len(val_dataset)
+    }
+
+    meta_lines = [f"{k}: {v}" for k, v in metadata.items()]
+    meta_text = "\n".join(meta_lines)
+
+    # Leave room on the right for metadata and place it there
+    fig.tight_layout(rect=(0, 0, 0.78, 1))
+    fig.text(0.8, 0.5, meta_text, fontsize=8, ha='left', va='center', family='monospace')
+
+    img_path = os.path.join(run_dir, f"training_history.png")
+    fig.savefig(img_path)
+    print(f"Saved training+accuracy plot to {img_path}")
+
+    # Also save a compact accuracy-only figure
+    acc_path = os.path.join(run_dir, f"accuracy_history.png")
+    fig2, ax = plt.subplots(figsize=(6, 4), dpi=160)
+    ax.plot(history['train_acc'], label='train_acc')
+    ax.plot(history['val_acc'], label='val_acc')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Accuracy')
+    ax.set_title('Training and Validation Accuracy')
+    ax.legend()
+    fig2.tight_layout()
+    fig2.savefig(acc_path)
+    plt.close(fig2)
+
+    # Save CSV with metadata and per-epoch metrics
+    csv_path = os.path.join(run_dir, f"evaluation.csv")
+    with open(csv_path, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        # metadata section
+        writer.writerow(['metadata_key', 'metadata_value'])
+        for k, v in metadata.items():
+            writer.writerow([k, v])
+        writer.writerow([])
+        # per-epoch metrics
+        writer.writerow(['epoch', 'train_loss', 'val_loss', 'train_acc', 'val_acc'])
+        for i in range(len(history['loss'])):
+            writer.writerow([
+                i + 1,
+                history['loss'][i],
+                history['val_loss'][i],
+                history['train_acc'][i],
+                history['val_acc'][i]
+            ])
+    print(f"Saved evaluation CSV to {csv_path}")
+
     plt.show()
 except Exception as e:
-    print('Could not create training plot:', e)
+    print('Could not create evaluation outputs:', e)
