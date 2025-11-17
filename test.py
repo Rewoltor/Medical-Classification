@@ -72,12 +72,18 @@ print(f"Data loaded: {len(test_dataset)} test images from 'auto_test'.")
 # --- 5. Re-define and Load the Model ---
 
 # We must define the same model architecture to load the weights
-model = models.resnet18(weights=None) # We don't need pre-trained weights, just the architecture
+# The training script replaced `model.fc` with a `Sequential` containing Dropout
+# followed by the final Linear layer (so state_dict keys are `fc.1.weight` / `fc.1.bias`).
+# Recreate the same structure here so the keys match.
+model = models.resnet18(weights=None) # architecture only; pre-trained weights are optional
 num_ftrs = model.fc.in_features
-model.fc = nn.Linear(num_ftrs, 1)
+model.fc = nn.Sequential(
+    nn.Dropout(0.5),
+    nn.Linear(num_ftrs, 1)
+)
 
-# Load the saved state dictionary
-model.load_state_dict(torch.load(MODEL_PATH))
+# Load the saved state dictionary (map weights to the current device to avoid device mismatch)
+model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 
 # Move the model to the 'mps' device
 model = model.to(device)

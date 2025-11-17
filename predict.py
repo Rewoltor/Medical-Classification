@@ -32,7 +32,11 @@ else:
 # --- Model ---
 model = models.resnet18(weights=None)
 num_ftrs = model.fc.in_features
-model.fc = nn.Linear(num_ftrs, 1)
+# Match the training model: Dropout followed by a Linear layer.
+model.fc = nn.Sequential(
+    nn.Dropout(0.5),
+    nn.Linear(num_ftrs, 1)
+)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
 model = model.to(device)
 model.eval()

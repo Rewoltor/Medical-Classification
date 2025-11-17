@@ -13,13 +13,13 @@ import csv
 import datetime
 
 # Configuration from previous paper
-LEARNING_RATE_NEW_LAYER = 0.01    
-LEARNING_RATE_FINE_TUNE = 0.001   
+LEARNING_RATE_NEW_LAYER = 0.001
+LEARNING_RATE_FINE_TUNE = 0.0001   
 BATCH_SIZE = 32
-NUM_EPOCHS = 10 # maybe 20-30 epocs on few images
+NUM_EPOCHS = 5                 # maybe 20-30 epocs on few images
 INPUT_SIZE = 224
-TRAIN_LIMIT = 1000              # max training samples used (set None to disable)
-NUM_WORKERS = 0                # DataLoader workers
+TRAIN_LIMIT = 400              # max training samples used (set None to disable) -› number of images used to train
+NUM_WORKERS = 0
 RANDOM_SEED = 42               # seed for reproducible shuffling
 
 TRAIN_DIR = "./dataset/train"
@@ -44,52 +44,68 @@ if RANDOM_SEED is not None:
 
 # --- 3. Custom Dataset Class (Modified to limit training data) ---
 
+# --- 3. Custom Dataset Class (MODIFIED FOR STRATIFIED SAMPLING) ---
+
 class ArthritisDataset(Dataset):
-    def __init__(self, root_dir, transform=None):
+    def __init__(self, root_dir, transform=None, limit=None):
         self.root_dir = root_dir
         self.transform = transform
         self.file_paths = []
         self.labels = []
+        
+        # We will apply the limit only if 'train' is in the root_dir
+        is_train_set = "train" in root_dir and limit is not None
+        
+        # We want a balanced set, so we'll take limit / 2 from each class
+        limit_per_class = int(limit / 2) if is_train_set else None
 
         label_map = {'0': 0, '2': 1, '3': 1, '4': 1}
+        class_counts = {0: 0, 1: 0}
+        
+        print(f"Loading data from: {root_dir}")
         
         for class_folder in os.listdir(root_dir):
             if class_folder in label_map:
                 label = label_map[class_folder]
                 class_path = os.path.join(root_dir, class_folder)
                 
-                for img_path in glob.glob(os.path.join(class_path, "*.png")):
+                # Get all images for this class
+                images_in_class = [
+                    os.path.join(class_path, img) 
+                    for img in os.listdir(class_path) 
+                    if img.endswith(".png")
+                ]
+                
+                # --- STRATIFIED SAMPLING LOGIC ---
+                # If this is the training set, shuffle and limit this class
+                if is_train_set:
+                    random.shuffle(images_in_class)
+                    if limit_per_class is not None:
+                         images_in_class = images_in_class[:limit_per_class]
+                # --- END OF SAMPLING LOGIC ---
+                
+                # Add the selected images to our dataset
+                for img_path in images_in_class:
                     self.file_paths.append(img_path)
                     self.labels.append(label)
-            
+                    class_counts[label] += 1
+                    
             elif class_folder == '1':
-                print(f"Ignoring folder: {os.path.join(root_dir, class_folder)}")
-            
+                # Ignoring Grade 1 as per the paper [cite: 239]
+                pass
             else:
                 print(f"Warning: Found unexpected folder, ignoring: {class_folder}")
 
-        # --- 2. MODIFICATION TO LIMIT TRAINING DATA ---
-        
-        # Combine paths and labels to shuffle them together
+        # Now, shuffle the *entire* final dataset (paths and labels together)
         temp_list = list(zip(self.file_paths, self.labels))
         random.shuffle(temp_list)
-        
-        # Unzip back into lists
         self.file_paths, self.labels = zip(*temp_list)
         
-        # Convert from tuple back to list
-        self.file_paths = list(self.file_paths)
-        self.labels = list(self.labels)
-
-        # Apply train limit (TRAIN_LIMIT) only to the training set
-        limit = TRAIN_LIMIT
-        # Check if 'train' is in the directory path (to not limit 'val' set)
-        if limit is not None and "train" in root_dir and len(self.file_paths) > limit:
-            self.file_paths = self.file_paths[:limit]
-            self.labels = self.labels[:limit]
-            print(f"  -> Dataset at {root_dir} randomly limited to {limit} images.")
-        # --- END OF MODIFICATION ---
-
+        print(f"  -> Loaded {len(self.file_paths)} images.")
+        print(f"  -> Label counts: {class_counts}")
+        if is_train_set and (class_counts[0] != class_counts[1]):
+             print(f"  -> WARNING: Training set is imbalanced. Check image counts.")
+        
     def __len__(self):
         return len(self.file_paths)
 
@@ -109,7 +125,8 @@ data_transforms = {
     'train': transforms.Compose([
         transforms.Resize((INPUT_SIZE, INPUT_SIZE)),
         transforms.RandomHorizontalFlip(), 
-        transforms.RandomRotation(10),     
+        transforms.RandomRotation(15), # <-- Increased from 10
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
@@ -120,13 +137,13 @@ data_transforms = {
     ]),
 }
 
-train_dataset = ArthritisDataset(root_dir=TRAIN_DIR, transform=data_transforms['train'])
-val_dataset = ArthritisDataset(root_dir=VAL_DIR, transform=data_transforms['val']) 
+train_dataset = ArthritisDataset(root_dir=TRAIN_DIR, transform=data_transforms['train'], limit=TRAIN_LIMIT)
+val_dataset = ArthritisDataset(root_dir=VAL_DIR, transform=data_transforms['val'], limit=None)
 
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS) 
 
-print(f"Data loaded: {len(train_dataset)} train images, {len(val_dataset)} validation images.") # This will now show 600 train images
+print(f"Data loaded: {len(train_dataset)} train images, {len(val_dataset)} validation images.") 
 
 # --- 5. Define the ResNet-18 Model and Fine-Tuning Setup ---
 
@@ -140,7 +157,12 @@ for param in model.layer4.parameters():
     param.requires_grad = True
 
 num_ftrs = model.fc.in_features
-model.fc = nn.Linear(num_ftrs, 1)
+
+# Replace the final layer with a sequence including Dropout
+model.fc = nn.Sequential(
+    nn.Dropout(0.5),  # <-- ADD DROPOUT (50% probability)
+    nn.Linear(num_ftrs, 1)
+)
 
 model = model.to(device)
 
@@ -148,10 +170,10 @@ model = model.to(device)
 
 criterion = nn.BCEWithLogitsLoss()
 
-optimizer = optim.Adam([
+optimizer = optim.AdamW([
     {'params': model.fc.parameters(), 'lr': LEARNING_RATE_NEW_LAYER},
-    {'params': model.layer4.parameters(), 'lr': LEARNING_RATE_FINE_TUNE}
-])
+    {'params': model.layer4.parameters(), 'lr': LEARNING_RATE_FINE_TUNE},
+], weight_decay=1e-4)
 
 # --- 7. Training and Validation Loop ---
 
