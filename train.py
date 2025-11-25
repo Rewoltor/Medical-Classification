@@ -12,15 +12,15 @@ import matplotlib.pyplot as plt
 import csv
 import datetime
 
-# Configuration from previous paper
+# Configuration based on previous paper
 LEARNING_RATE_NEW_LAYER = 0.001
 LEARNING_RATE_FINE_TUNE = 0.0001   
 BATCH_SIZE = 32
 NUM_EPOCHS = 5                 # maybe 20-30 epocs on few images
 INPUT_SIZE = 224
-TRAIN_LIMIT = 400              # max training samples used (set None to disable) -› number of images used to train
+TRAIN_LIMIT = 500             # max training samples used (set None to disable) -› number of images used to train (max 4732)
 NUM_WORKERS = 0
-RANDOM_SEED = 42               # seed for reproducible shuffling
+RANDOM_SEED = 42                # seed for reproducible shuffling
 
 TRAIN_DIR = "./dataset/train"
 VAL_DIR = "./dataset/val"
@@ -43,7 +43,6 @@ if RANDOM_SEED is not None:
     torch.manual_seed(RANDOM_SEED)
 
 # --- 3. Custom Dataset Class (Modified to limit training data) ---
-
 # --- 3. Custom Dataset Class (MODIFIED FOR STRATIFIED SAMPLING) ---
 
 class ArthritisDataset(Dataset):
@@ -58,6 +57,10 @@ class ArthritisDataset(Dataset):
         
         # We want a balanced set, so we'll take limit / 2 from each class
         limit_per_class = int(limit / 2) if is_train_set else None
+
+        # Collapse multi-grade arthritis severity into a binary (positive/negative) label for simplicity 
+        # Excluded calss 1 due to it being ambigous 
+        # Arthiritis literature supports this
 
         label_map = {'0': 0, '2': 1, '3': 1, '4': 1}
         class_counts = {0: 0, 1: 0}

@@ -5,43 +5,44 @@ from torchvision import models, transforms
 from PIL import Image
 import os
 import glob
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix, classification_report
 
-# --- 1. Define Constants and Configuration ---
+# --- Configuration ---
+CONFIG = {
+    'test_dir': "./dataset/test",
+    'model_path': "./arthritis_classifier.pth",
+    'output_dir': "./eval_results",
+    'batch_size': 32,
+    'input_size': 224,
+    'num_workers': 0,
+    'class_map': {'0': 0, '2': 1, '3': 1, '4': 1} # 0: Negative, 1: Positive
+}
 
-TEST_DIR = "./dataset/test" # The final, unseen test set
-MODEL_PATH = "./arthritis_classifier.pth"
-BATCH_SIZE = 32
-INPUT_SIZE = 224
+# --- Device Setup ---
+def get_device():
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# --- 2. Set up the 'mps' Device ---
-
-if not torch.backends.mps.is_available():
-    print("MPS not available. Using CPU.")
-    device = torch.device("cpu")
-else:
-    print("MPS is available. Using M1 GPU.")
-    device = torch.device("mps")
-
-# --- 3. Custom Dataset Class ---
-# We must include the *exact same* Dataset class used in training
-# to ensure data is loaded correctly.
-
+# --- Dataset ---
 class ArthritisDataset(Dataset):
     def __init__(self, root_dir, transform=None):
         self.root_dir = root_dir
         self.transform = transform
         self.file_paths = []
         self.labels = []
-        label_map = {'0': 0, '2': 1, '3': 1, '4': 1}
         
-        for class_folder in os.listdir(root_dir):
-            if class_folder in label_map:
-                label = label_map[class_folder]
-                class_path = os.path.join(root_dir, class_folder)
-                for img_path in glob.glob(os.path.join(class_path, "*.png")):
-                    self.file_paths.append(img_path)
-                    self.labels.append(label)
+        for class_folder, label_val in CONFIG['class_map'].items():
+            class_path = os.path.join(root_dir, class_folder)
+            if not os.path.exists(class_path):
+                continue
+                
+            img_paths = glob.glob(os.path.join(class_path, "*.png"))
+            self.file_paths.extend(img_paths)
+            self.labels.extend([label_val] * len(img_paths))
 
     def __len__(self):
         return len(self.file_paths)
@@ -49,76 +50,104 @@ class ArthritisDataset(Dataset):
     def __getitem__(self, idx):
         img_path = self.file_paths[idx]
         label = self.labels[idx]
-        image = Image.open(img_path).convert("RGB")
-        if self.transform:
-            image = self.transform(image)
-        return image, torch.tensor(label, dtype=torch.float32)
+        try:
+            image = Image.open(img_path).convert("RGB")
+            if self.transform:
+                image = self.transform(image)
+            return image, torch.tensor(label, dtype=torch.float32)
+        except Exception as e:
+            # Handle corrupt images gracefully during inference
+            print(f"Warning: Failed to load {img_path}. Skipping.")
+            return torch.zeros((3, CONFIG['input_size'], CONFIG['input_size'])), torch.tensor(label, dtype=torch.float32)
 
-# --- 4. Define Data Transform and DataLoader ---
-
-# Use the 'val' transform from the training script
-test_transform = transforms.Compose([
-    transforms.Resize((INPUT_SIZE, INPUT_SIZE)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-])
-
-# Create the Dataset and DataLoader
-test_dataset = ArthritisDataset(root_dir=TEST_DIR, transform=test_transform)
-test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
-
-print(f"Data loaded: {len(test_dataset)} test images from 'auto_test'.")
-
-# --- 5. Re-define and Load the Model ---
-
-# We must define the same model architecture to load the weights
-# The training script replaced `model.fc` with a `Sequential` containing Dropout
-# followed by the final Linear layer (so state_dict keys are `fc.1.weight` / `fc.1.bias`).
-# Recreate the same structure here so the keys match.
-model = models.resnet18(weights=None) # architecture only; pre-trained weights are optional
-num_ftrs = model.fc.in_features
-model.fc = nn.Sequential(
-    nn.Dropout(0.5),
-    nn.Linear(num_ftrs, 1)
-)
-
-# Load the saved state dictionary (map weights to the current device to avoid device mismatch)
-model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
-
-# Move the model to the 'mps' device
-model = model.to(device)
-
-# --- 6. Evaluation Loop ---
-
-print("Starting final evaluation on the 'auto_test' set...")
-model.eval()  # Set model to evaluation mode
-all_labels = []
-all_preds = []
-
-with torch.no_grad():  # Disable gradient calculation
-    for inputs, labels in test_loader:
-        inputs = inputs.to(device)
+# --- Model Loader ---
+def load_model(device):
+    model = models.resnet18(weights=None)
+    num_ftrs = model.fc.in_features
+    
+    # Match architecture from training
+    model.fc = nn.Sequential(
+        nn.Dropout(0.5),
+        nn.Linear(num_ftrs, 1)
+    )
+    
+    if os.path.exists(CONFIG['model_path']):
+        state_dict = torch.load(CONFIG['model_path'], map_location=device)
+        model.load_state_dict(state_dict)
+    else:
+        raise FileNotFoundError(f"Model weights not found at {CONFIG['model_path']}")
         
-        # Forward pass
-        outputs = model(inputs.to(device))
-        
-        # Convert logits to binary predictions (0 or 1)
-        preds = torch.round(torch.sigmoid(outputs))
-        
-        # Store labels and predictions
-        all_labels.extend(labels.cpu().numpy())
-        all_preds.extend(preds.cpu().numpy())
+    return model.to(device)
 
-# --- 7. Calculate and Print Metrics ---
+# --- Visualization ---
+def save_confusion_matrix(y_true, y_pred, output_dir):
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False,
+                xticklabels=['Negative', 'Positive'],
+                yticklabels=['Negative', 'Positive'])
+    plt.title('Confusion Matrix')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'confusion_matrix.png'))
+    plt.close()
 
-# Calculate metrics using sklearn
-accuracy = accuracy_score(all_labels, all_preds)
-precision = precision_score(all_labels, all_preds)
-recall = recall_score(all_labels, all_preds)
-f1 = f1_score(all_labels, all_preds)
+# --- Main Execution ---
+if __name__ == "__main__":
+    os.makedirs(CONFIG['output_dir'], exist_ok=True)
+    device = get_device()
+    print(f"Running evaluation on {device}")
 
-print("\n--- Final Test Results ('auto_test') ---")
-print(f"Accuracy:  {accuracy:.4f}")
-print(f"Precision: {precision:.4f} (Correct positive predictions / All positive predictions)")
-print(f"Recall:    {recall:.4f} (Correct positive predictions / All actual positives)")
-print(f"F1-Score:  {f1:.4f} (Harmonic mean of Precision and Recall)")
+    # Data Setup
+    test_transform = transforms.Compose([
+        transforms.Resize((CONFIG['input_size'], CONFIG['input_size'])),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+
+    dataset = ArthritisDataset(CONFIG['test_dir'], transform=test_transform)
+    loader = DataLoader(dataset, batch_size=CONFIG['batch_size'], shuffle=False, num_workers=CONFIG['num_workers'])
+    print(f"Dataset loaded: {len(dataset)} samples")
+
+    # Inference
+    model = load_model(device)
+    model.eval()
+    
+    y_true = []
+    y_pred = []
+
+    print("Starting inference...")
+    with torch.no_grad():
+        for inputs, labels in loader:
+            inputs = inputs.to(device)
+            outputs = model(inputs)
+            preds = torch.round(torch.sigmoid(outputs))
+            
+            y_true.extend(labels.cpu().numpy())
+            y_pred.extend(preds.cpu().numpy())
+
+    # Metrics
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+
+    acc = accuracy_score(y_true, y_pred)
+    precision, recall, f1, _ = precision_recall_fscore_support(y_true, y_pred, average='binary')
+    
+    # Calculate Null Accuracy (Baseline)
+    values, counts = np.unique(y_true, return_counts=True)
+    majority_class_idx = np.argmax(counts)
+    null_accuracy = counts[majority_class_idx] / len(y_true)
+
+    # Output Generation
+    print("\n--- Performance Metrics ---")
+    print(f"Accuracy:      {acc:.4f} (Baseline: {null_accuracy:.4f})")
+    print(f"Precision:     {precision:.4f}")
+    print(f"Recall:        {recall:.4f}")
+    print(f"F1 Score:      {f1:.4f}")
+    print("\n--- Classification Report ---")
+    print(classification_report(y_true, y_pred, target_names=['Negative', 'Positive']))
+
+    # Save Artifacts
+    save_confusion_matrix(y_true, y_pred, CONFIG['output_dir'])
+    print(f"Artifacts saved to {CONFIG['output_dir']}")

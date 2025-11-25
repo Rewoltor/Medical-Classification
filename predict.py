@@ -130,6 +130,13 @@ for img_path in image_paths:
 
     # prepare output path
     rel_dir = os.path.relpath(os.path.dirname(img_path), TEST_DIR)
+
+    # Determine ground truth from folder name
+    ground_truth_raw = rel_dir
+    # 0->0 (negative), 2,3,4->1 (positive), 1->excluded
+    label_map = {'0': 0, '2': 1, '3': 1, '4': 1}
+    ground_truth_binary = label_map.get(ground_truth_raw, "")
+
     out_subdir = os.path.join(OUTPUT_DIR, rel_dir) if rel_dir != "." else OUTPUT_DIR
     os.makedirs(out_subdir, exist_ok=True)
     base_name = os.path.splitext(os.path.basename(img_path))[0]
@@ -184,6 +191,8 @@ for img_path in image_paths:
 
     results.append({
         "image": os.path.relpath(img_path),
+        "ground_truth_raw": ground_truth_raw,
+        "ground_truth_binary": ground_truth_binary,
         "output_logit": float(output.item()),
         "probability": float(prob),
         "prediction": int(pred_class),
@@ -205,7 +214,7 @@ for img_path in image_paths:
 # write CSV
 with open(pred_csv_path, "w", newline="") as csvfile:
     fieldnames = [
-        "image", "output_logit", "probability", "prediction", "overlay",
+        "image", "ground_truth_raw", "ground_truth_binary", "output_logit", "probability", "prediction", "overlay",
         "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
         "bbox_xmin_norm", "bbox_ymin_norm", "bbox_xmax_norm", "bbox_ymax_norm",
         "bbox_area_pct", "bbox_mean_activation"
