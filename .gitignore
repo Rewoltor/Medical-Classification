@@ -36,3 +36,5 @@ predicted/predictions.csv
 arthritis_classifier.pth
 
 eval/
+
+eval_results/

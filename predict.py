@@ -16,6 +16,17 @@ OUTPUT_DIR = "./predicted"
 COMMON_EXTS = ("*.png", "*.jpg", "*.jpeg", "*.bmp")
 INPUT_SIZE = 224
 
+# --- Visualization Tuning ---
+# 1. The point where the fade to transparency ends.
+#    Values below this are completely invisible. 
+#    Values above this start fading in.
+HEATMAP_THRESHOLD = 0.50 
+
+# 2. Maximum intensity of the overlay at the "hottest" (red) spot.
+#    0.4 means the red color will never be more than 40% opaque.
+#    This keeps it "bland" and prevents it from hiding the bone.
+MAX_OPACITY = 0.60
+
 def collect_images(test_dir):
     imgs = []
     for root, _, _ in os.walk(test_dir):
@@ -32,7 +43,6 @@ else:
 # --- Model ---
 model = models.resnet18(weights=None)
 num_ftrs = model.fc.in_features
-# Match the training model: Dropout followed by a Linear layer.
 model.fc = nn.Sequential(
     nn.Dropout(0.5),
     nn.Linear(num_ftrs, 1)
@@ -51,16 +61,13 @@ def forward_hook(module, input, output):
 
 def backward_hook(module, grad_input, grad_output):
     global gradients
-    # grad_output is a tuple
     gradients = grad_output[0].detach()
 
-# Use register_full_backward_hook if available (preferred)
 target_layer = model.layer4
 fwd_handle = target_layer.register_forward_hook(forward_hook)
 try:
     bwd_handle = target_layer.register_full_backward_hook(lambda m, gi, go: backward_hook(m, gi, go))
 except Exception:
-    # Fallback for older PyTorch
     bwd_handle = target_layer.register_backward_hook(backward_hook)
 
 # --- Preprocess ---
@@ -80,8 +87,9 @@ if not image_paths:
 
 results = []
 
+print(f"Starting prediction with Soft Fade... Threshold={HEATMAP_THRESHOLD}, Max Opacity={MAX_OPACITY}")
+
 for img_path in image_paths:
-    # reset captured tensors
     gradients = None
     activations = None
 
@@ -91,9 +99,7 @@ for img_path in image_paths:
         print(f"Failed to open {img_path}: {e}. Skipping.")
         continue
 
-    # original image size (width, height) — we'll report bbox in original coords
     orig_w, orig_h = pil_img.size
-
     input_tensor = preprocess(pil_img).unsqueeze(0).to(device)
 
     model.zero_grad()
@@ -101,14 +107,12 @@ for img_path in image_paths:
         output = model(input_tensor)
         prob = torch.sigmoid(output).item()
         pred_class = 1 if prob > 0.5 else 0
-        # backward
         output.backward(torch.ones_like(output))
 
     recorded_heatmap = None
     if gradients is None or activations is None:
-        print(f"Grad-CAM hooks failed for {img_path}; saving original image without overlay.")
+        print(f"Grad-CAM hooks failed for {img_path}")
     else:
-        # pooled gradients
         if gradients.ndim == 4:
             pooled = torch.mean(gradients, dim=(0, 2, 3))
         else:
@@ -128,12 +132,9 @@ for img_path in image_paths:
             heatmap_np = np.zeros_like(heatmap_np)
         recorded_heatmap = heatmap_np
 
-    # prepare output path
+    # Prepare output paths
     rel_dir = os.path.relpath(os.path.dirname(img_path), TEST_DIR)
-
-    # Determine ground truth from folder name
     ground_truth_raw = rel_dir
-    # 0->0 (negative), 2,3,4->1 (positive), 1->excluded
     label_map = {'0': 0, '2': 1, '3': 1, '4': 1}
     ground_truth_binary = label_map.get(ground_truth_raw, "")
 
@@ -142,8 +143,6 @@ for img_path in image_paths:
     base_name = os.path.splitext(os.path.basename(img_path))[0]
     out_image_path = os.path.join(out_subdir, f"{base_name}_gradcam.png")
 
-    # create overlay and compute bbox from heatmap (in original image coords)
-    # default bbox values
     bbox_abs = ("", "", "", "")
     bbox_norm = ("", "", "", "")
     bbox_area_pct = ""
@@ -153,18 +152,20 @@ for img_path in image_paths:
         img_cv = cv2.imread(img_path)
         if img_cv is None:
             img_cv = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-        # keep original resolution for overlay and bbox
         img_h, img_w = img_cv.shape[:2]
+        
+        # Start with the original image
+        final_image = img_cv.copy().astype(np.float32)
 
         if recorded_heatmap is not None:
-            # resize heatmap to original image resolution
             heatmap_resized = cv2.resize(recorded_heatmap, (img_w, img_h))
-            heatmap_uint8 = np.uint8(255 * heatmap_resized)
-
-            # threshold to produce mask of high-activation areas
-            thresh_val = 0.2  # relative threshold (tunable)
-            _, mask = cv2.threshold(np.uint8(255 * heatmap_resized), int(255 * thresh_val), 255, cv2.THRESH_BINARY)
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # --- 1. Compute Bounding Box (Keep Tight Logic) ---
+            # We still use binary thresholding for the BOX so it fits tightly around the hotspot
+            heatmap_uint8_full = np.uint8(255 * heatmap_resized)
+            _, mask_thresh = cv2.threshold(heatmap_uint8_full, int(255 * HEATMAP_THRESHOLD), 255, cv2.THRESH_BINARY)
+            
+            contours, _ = cv2.findContours(mask_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             if contours:
                 largest = max(contours, key=cv2.contourArea)
                 x, y, w, h = cv2.boundingRect(largest)
@@ -175,17 +176,37 @@ for img_path in image_paths:
                 mean_act = float(np.mean(heatmap_resized[y:y+h, x:x+w])) if (w*h) > 0 else 0.0
                 bbox_mean_activation = mean_act
 
-            # generate color heatmap and overlay
-            heatmap_color = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
-            superimposed = cv2.addWeighted(img_cv, 0.6, heatmap_color, 0.4, 0)
-        else:
-            superimposed = img_cv
+            # --- 2. Generate Soft-Fade Overlay ---
+            # Create color map (JET)
+            heatmap_color = cv2.applyColorMap(heatmap_uint8_full, cv2.COLORMAP_JET).astype(np.float32)
 
-        # NOTE: intentionally do NOT draw the bbox on the overlay image.
-        # We still compute and export bbox coordinates to the CSV, but
-        # the visual overlay should remain heatmap-only per user request.
+            # --- THE FADE LOGIC ---
+            # Instead of a hard binary mask (0 or 1), we create a gradient alpha.
+            # 1. Shift the heatmap so that 'threshold' becomes 0.
+            # 2. Scale the remainder so that 1.0 remains 1.0 (relative to the threshold span).
+            
+            # Clip anything below threshold to 0
+            alpha_channel = np.maximum(heatmap_resized - HEATMAP_THRESHOLD, 0)
+            
+            # Normalize the range [Threshold ... 1.0] to [0.0 ... 1.0]
+            if (1.0 - HEATMAP_THRESHOLD) > 0:
+                alpha_channel /= (1.0 - HEATMAP_THRESHOLD)
+            
+            # Apply global opacity limit (e.g., max 40% opacity)
+            alpha_channel *= MAX_OPACITY
+            
+            # Expand alpha for broadcasting: (H, W) -> (H, W, 3)
+            alpha_3d = np.dstack([alpha_channel] * 3)
 
-        cv2.imwrite(out_image_path, superimposed)
+            # Perform the alpha blend
+            # formula: Output = (1 - alpha) * Original + (alpha) * Heatmap
+            blended = (1.0 - alpha_3d) * final_image + alpha_3d * heatmap_color
+            final_image = blended
+
+        # Convert back to uint8 for saving
+        final_image = np.clip(final_image, 0, 255).astype(np.uint8)
+        cv2.imwrite(out_image_path, final_image)
+        
     except Exception as e:
         print(f"Failed to create/save overlay for {img_path}: {e}")
 
@@ -209,7 +230,7 @@ for img_path in image_paths:
         "bbox_mean_activation": float(f"{bbox_mean_activation:.6f}") if bbox_mean_activation != "" else ""
     })
 
-    print(f"Processed: {img_path} -> pred={pred_class} prob={prob:.4f} overlay={out_image_path}")
+    print(f"Processed: {img_path} -> pred={pred_class} prob={prob:.4f}")
 
 # write CSV
 with open(pred_csv_path, "w", newline="") as csvfile:
