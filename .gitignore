@@ -38,3 +38,5 @@ arthritis_classifier.pth
 eval/
 
 eval_results/
+
+random sample/sampled/
