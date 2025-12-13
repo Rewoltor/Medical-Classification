@@ -21,6 +21,7 @@ INPUT_SIZE = 224
 #    Values below this are completely invisible. 
 #    Values above this start fading in.
 HEATMAP_THRESHOLD = 0.50 
+BBOX_THRESHOLD = 0.8 # Higher threshold for tighter bounding box
 
 # 2. Maximum intensity of the overlay at the "hottest" (red) spot.
 #    0.4 means the red color will never be more than 40% opaque.
@@ -163,9 +164,16 @@ for img_path in image_paths:
             # --- 1. Compute Bounding Box (Keep Tight Logic) ---
             # We still use binary thresholding for the BOX so it fits tightly around the hotspot
             heatmap_uint8_full = np.uint8(255 * heatmap_resized)
-            _, mask_thresh = cv2.threshold(heatmap_uint8_full, int(255 * HEATMAP_THRESHOLD), 255, cv2.THRESH_BINARY)
             
+            # Try with stricter BBOX_THRESHOLD first
+            _, mask_thresh = cv2.threshold(heatmap_uint8_full, int(255 * BBOX_THRESHOLD), 255, cv2.THRESH_BINARY)
             contours, _ = cv2.findContours(mask_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Fallback to HEATMAP_THRESHOLD if no contours found
+            if not contours:
+                _, mask_thresh = cv2.threshold(heatmap_uint8_full, int(255 * HEATMAP_THRESHOLD), 255, cv2.THRESH_BINARY)
+                contours, _ = cv2.findContours(mask_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
             if contours:
                 largest = max(contours, key=cv2.contourArea)
                 x, y, w, h = cv2.boundingRect(largest)
