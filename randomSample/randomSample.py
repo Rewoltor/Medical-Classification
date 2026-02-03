@@ -308,18 +308,39 @@ def copy_images(selected: List[ImageRecord]) -> List[Tuple[int, ImageRecord]]:
 
 def generate_csv(indexed_records: List[Tuple[int, ImageRecord]]):
     """
-    Generate sampled/predictions.csv with scientifically honest column names.
+    Generate sampled/predictions.csv preserving all original columns from source CSV.
     
-    Note: 'softmax_confidence' acknowledges this is a proxy metric,
-    not the Entropy measure used in Jeon et al. (2025).
+    Columns:
+    - image: new filename (1.png, 2.png, ...)
+    - image_name: original GradCAM filename
+    - image_name_original: original filename (without _gradcam)
+    - class: KL Grade folder
+    - ai_confidence: softmax-derived confidence proxy
+    - All original columns from predictions.csv
     """
+    # Define output fieldnames - matching the original format
     fieldnames = [
         'image',
-        'original_filename', 
+        'image_name',
+        'image_name_original',
+        'class',
+        'ai_confidence',
         'ground_truth_raw',
-        'prediction',
+        'ground_truth_binary',
+        'output_logit',
         'probability',
-        'softmax_confidence'  # Renamed for scientific honesty
+        'prediction',
+        'overlay',
+        'bbox_xmin',
+        'bbox_ymin',
+        'bbox_xmax',
+        'bbox_ymax',
+        'bbox_xmin_norm',
+        'bbox_ymin_norm',
+        'bbox_xmax_norm',
+        'bbox_ymax_norm',
+        'bbox_area_pct',
+        'bbox_mean_activation'
     ]
     
     with open(NEW_PREDICTIONS_CSV, 'w', newline='') as f:
@@ -327,14 +348,28 @@ def generate_csv(indexed_records: List[Tuple[int, ImageRecord]]):
         writer.writeheader()
         
         for idx, record in indexed_records:
-            writer.writerow({
+            # Build row with new columns + all original data
+            row_to_write = {
                 'image': f"{idx}.png",
-                'original_filename': record.filename,
-                'ground_truth_raw': record.ground_truth_raw,
-                'prediction': record.prediction,
-                'probability': f"{record.probability:.6f}",
-                'softmax_confidence': f"{record.softmax_confidence:.4f}"
-            })
+                'image_name': record.gradcam_filename,
+                'image_name_original': record.filename,
+                'class': record.kl_grade,
+                'ai_confidence': f"{record.softmax_confidence:.4f}",
+            }
+            
+            # Copy all original columns from source row
+            original_columns = [
+                'ground_truth_raw', 'ground_truth_binary', 'output_logit',
+                'probability', 'prediction', 'overlay',
+                'bbox_xmin', 'bbox_ymin', 'bbox_xmax', 'bbox_ymax',
+                'bbox_xmin_norm', 'bbox_ymin_norm', 'bbox_xmax_norm', 'bbox_ymax_norm',
+                'bbox_area_pct', 'bbox_mean_activation'
+            ]
+            
+            for col in original_columns:
+                row_to_write[col] = record.row.get(col, '')
+            
+            writer.writerow(row_to_write)
 
 
 def print_summary(indexed_records: List[Tuple[int, ImageRecord]]):
