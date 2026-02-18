@@ -1,113 +1,92 @@
-# Medical-Classification
+# Medical Classifier - Percotate Research Project
 
-A small PyTorch project for binary classification of arthritis images using a fine-tuned ResNet-18.
-The repository includes training, evaluation and prediction (Grad-CAM overlays) scripts.
+This repository contains the codebase for the "Medical Classifier" research project. It focuses on the automated severity grading of Knee Osteoarthritis (KOA) using deep learning (ResNet-18) and rigorous evaluation methodologies for Human-AI collaboration studies.
 
-## Contents
-- `train.py` — training / fine-tuning script (expects `dataset/train` and `dataset/val`)
-- `test.py` — evaluation script (expects `dataset/test`)
-- `predict.py` — batch inference + Grad-CAM overlays (reads images under `dataset/test` and writes `predicted/`)
-- `best_arthritis_classifier.pth` — example checkpoint filename (keep model files out of Git)
-- `.gitignore` — excludes venv, dataset, predictions and model files
+**Audience:** Researchers and Reviewers
 
-## Quick facts
-- Input size: 224x224 (ResNet-18)
-- Loss: `BCEWithLogitsLoss` (binary output)
-- Label mapping (used by the dataset classes):
-  - folder `0` -> label `0` (negative)
-  - folders `2`, `3`, `4` -> label `1` (positive)
-  - folder `1` is ignored by the training script if present
-- `train.py` and `test.py` currently load `*.png` images; `predict.py` accepts PNG/JPG/JPEG/BMP
+## 1. Dataset
 
-## Expected dataset layout
-Place your images under a `dataset/` folder with the following structure:
+This project utilizes the **Knee Osteoarthritis Severity Grading Dataset**:
 
-```
-dataset/
-  train/
-    0/    # png images for class 0
-    2/
-    3/
-    4/
-  val/
-    0/
-    2/
-    3/
-    4/
-  test/
-    0/    # or arbitrary nested images for predict.py
-    2/
-    3/
-    4/
-```
+*   **Source:** [Mendeley Data](https://data.mendeley.com/datasets/56rmx5bjcr/1)
+*   **Citation:** Chen, P. (2018). Knee osteoarthritis severity grading dataset. Mendeley Data, V1. doi: 10.17632/56rmx5bjcr.1
+*   **Structure:**
+    *   The dataset is organized by KL (Kellgren-Lawrence) grades (0-4).
+    *   `0`: Healthy
+    *   `1`: Doubtful
+    *   `2`: Minimal
+    *   `3`: Moderate
+    *   `4`: Severe
 
-Notes:
-- If your images are JPEG, either convert them to PNG or update `train.py`/`test.py` to accept multiple extensions.
-- `predict.py` will search recursively under `dataset/test` and write overlays to `predicted/` plus `predicted/predictions.csv`.
+## 2. Installation
 
-## Setup (macOS, M1 / Apple Silicon recommended)
-Run these from the project root.
+### Prerequisites
+*   Python 3.8+
+*   pip
 
-1. Create and activate virtual environment
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
+### Setup
 
-2. Upgrade pip and install lightweight deps
-```bash
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install pillow numpy scikit-learn opencv-python six
-```
+1.  **Clone the repository** & navigate to the project root.
+2.  **Create a virtual environment** (recommended):
+    ```bash
+    python3 -m venv .venv
+    source .venv/bin/activate
+    ```
+3.  **Install dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+4.  **Environment Variables:**
+    Create a `.env` file in the root directory if specific environment configurations are needed (refer to `.env.example` if available).
 
-3. Install PyTorch / torchvision (choose MPS for Apple Silicon)
-- Visit https://pytorch.org/get-started/locally/ and select the appropriate options (pip, macOS, MPS) and run the suggested command.
-- Example (verify on site before running):
-```bash
-# Example: CPU or MPS specific wheel from the official installer
-python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
-```
+## 3. Workflows
 
-4. Verify installation
-```bash
-python -c "import torch, torchvision, json; print(json.dumps({'torch':torch.__version__, 'torchvision':torchvision.__version__, 'mps':torch.backends.mps.is_available()}))"
-```
+### A. Training the Model (`train.py`)
+Trains a ResNet-18 model on the dataset. The script handles data augmentation, class balancing, and fine-tuning.
 
-## Run
-- Train (requires `dataset/train` and `dataset/val`):
-```bash
-source .venv/bin/activate
-python train.py
-```
-- Test (uses `dataset/test` and `best_arthritis_classifier.pth`):
-```bash
-python test.py
-```
-- Predict + Grad-CAM overlays:
-```bash
-python predict.py
-```
+*   **Command:** `python3 train.py`
+*   **Output:** Saves the best model weights to `arthritis_classifier_best.pth` and logs training history.
 
-## Git / Large files
-- `.gitignore` already excludes `.venv/`, `dataset/`, `predicted/`, and `arthritis_classifier.pth`.
-- If any of these are currently tracked, untrack them (keeps copies on disk but removes from git index):
-```bash
-git rm -r --cached .venv dataset predicted arthritis_classifier.pth || true
-git add .gitignore
-git commit -m "Stop tracking venv, dataset, predicted and model file" || true
-git push origin main
-```
+### B. Evaluating Performance (`test.py`)
+Evaluates the trained model on the test set. Generates comprehensive metrics including Confusion Matrix, ROC-AUC, and PR-AUC curves.
 
-If large files were pushed to remote history earlier, let me know and I will help you remove them with `git-filter-repo` or BFG (this rewrites history and requires a force push).
+*   **Command:** `python3 test.py`
+*   **Output:** Results are saved in the `eval_results/` directory.
 
-## Troubleshooting
-- `ModuleNotFoundError` for small packages like `six`: install them in the venv (`python -m pip install six`).
-- If torchvision raises import errors after upgrades, reinstall a matching torchvision for your installed torch (`pip uninstall torchvision && pip install torchvision`).
-- If OpenCV/Numpy conflicts appear, pin numpy to a compatible version (`python -m pip install "numpy<2.3.0"`).
+### C. Running Inference & GradCAM (`predict.py`)
+Runs inference on test images and generates GradCAM (Gradient-weighted Class Activation Mapping) overlays to visualize model attention.
 
-## Next steps / optional improvements
-- Generate `requirements.txt`: `python -m pip freeze > requirements.txt`
-- Accept multiple image extensions in `train.py`/`test.py` (I can update the scripts).
-- Add a small dataset summary script to print counts per class/split.
+*   **Command:** `python3 predict.py`
+*   **Output:**
+    *   Generates `predicted/predictions.csv` containing raw logits, probabilities, and bounding box data.
+    *   Saves images with GradCAM overlays in `predicted/`.
 
-If you'd like any of the optional improvements, pick one and I will implement it.
+### D. Rigorous Sampling for Human Studies (`randomSample/`)
+
+Scripts to generate scientifically rigorous subsets of data for Human-AI interaction experiments.
+
+#### 1. Stratified Confusion Matrix Sampling (`randomSample.py`)
+Implements the "DANNY" methodology (Jeon et al., 2025) to create a balanced dataset representing the AI's confusion matrix (TP, TN, FP, FN).
+
+*   **Command:** `python3 randomSample/randomSample.py`
+*   **Output:** Creates `randomSample/sampled/` with 50 images balanced across error types.
+
+#### 2. Random 10 Sampling (`randomSample/random 5.py`)
+Extracts a purely random set of 10 images (2 from each KL grade 0-4) for quick validation or specific small-scale tests.
+
+*   **Command:** `python3 "randomSample/random 5.py"`
+*   **Output:**
+    *   Creates `randomSample/sampled_5/`.
+    *   Images are renamed `51.png` - `60.png`.
+    *   Includes `predictions.csv` with full metadata for the selected images.
+
+## 4. Project Structure
+
+*   `dataset/`: Contains the specific training and testing data splits.
+*   `randomSample/`: Sampling logic for experiment generation.
+*   `eval_results/`: Output directory for evaluation metrics and graphs.
+*   `predicted/`: Output directory for inference results and GradCAM visualizations.
+*   `arthritis_classifier.pth`: Trained model weights.
+
+---
+**Contact:** For questions regarding this implementation or the associated research, please contact the repository maintainer.
