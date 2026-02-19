@@ -71,14 +71,14 @@ Implements the "DANNY" methodology (Jeon et al., 2025) to create a balanced data
 *   **Command:** `python3 randomSample/randomSample.py`
 *   **Output:** Creates `randomSample/sampled/` with 50 images balanced across error types.
 
-#### 2. Random 10 Sampling (`randomSample/random 5.py`)
-Extracts a purely random set of 10 images (2 from each KL grade 0-4) for quick validation or specific small-scale tests.
+#### 2. Random 8 Sampling (`randomSample/random 5.py`)
+Extracts a purely random set of 8 images (2 from each KL grade 0-3, KL Grade 4 excluded) for quick validation or specific small-scale tests.
 
 *   **Command:** `python3 "randomSample/random 5.py"`
 *   **Output:**
     *   Creates `randomSample/sampled_5/`.
-    *   Images are renamed `51.png` - `60.png`.
-    *   Includes `predictions.csv` with full metadata for the selected images.
+    *   Images are renamed `51.png` - `58.png`.
+    *   Includes `predictions.csv` with full metadata, sorted by image number.
 
 ## 4. Project Structure
 

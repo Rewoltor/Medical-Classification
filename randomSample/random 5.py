@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Random 5 Sampling Script
+Random 8 Sampling Script
 ========================
 
-Extracts 1 random image from each of the 5 classes (0, 1, 2, 3, 4).
-Maps Class 0->51, 1->52, 2->53, 3->54, 4->55.
+Extracts 2 random images from each of 4 classes (0, 1, 2, 3).
+KL Grade 4 is excluded.
+Maps to filenames 51-58.
 Generates a CSV log with ALL columns from the original predictions.csv.
 """
 
@@ -27,15 +28,16 @@ DEST_DIR = os.path.join(BASE_DIR, 'sampled_5')
 NEW_PREDICTIONS_CSV = os.path.join(DEST_DIR, 'predictions.csv')
 
 # Output filename mapping: Class -> List of New Filenames (without extension)
-# User request: 10 images total (2 per class)
-# Set 1: 51-55 (Classes 0-4)
-# Set 2: 56-60 (Classes 0-4)
+# 8 images total (2 per class, KL Grade 4 excluded)
+# Class 0 -> 51, 52
+# Class 1 -> 53, 54
+# Class 2 -> 55, 56
+# Class 3 -> 57, 58
 CLASS_TO_FILENAMES = {
-    '0': ['51', '56'],
-    '1': ['52', '57'],
-    '2': ['53', '58'],
-    '3': ['54', '59'],
-    '4': ['55', '60']
+    '0': ['51', '52'],
+    '1': ['53', '54'],
+    '2': ['55', '56'],
+    '3': ['57', '58']
 }
 
 def load_all_predictions() -> Dict[str, List[Dict[str, str]]]:
@@ -58,7 +60,7 @@ def load_all_predictions() -> Dict[str, List[Dict[str, str]]]:
 
 def main():
     print("="*60)
-    print("RANDOM 10 SAMPLING SCRIPT (51-60)")
+    print("RANDOM 8 SAMPLING SCRIPT (51-58)")
     print("="*60)
 
     # 1. Setup Destination
@@ -169,6 +171,9 @@ def main():
         'bbox_mean_activation'
     ]
     
+    # Sort rows by image number (increasing)
+    selected_rows.sort(key=lambda r: int(os.path.splitext(r['image'])[0]))
+
     with open(NEW_PREDICTIONS_CSV, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
