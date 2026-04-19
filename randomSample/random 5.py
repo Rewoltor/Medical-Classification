@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Random 8 Sampling Script
+Random 10 Sampling Script
 ========================
 
-Extracts 2 random images from each of 4 classes (0, 1, 2, 3).
-KL Grade 4 is excluded.
-Maps to filenames 51-58.
+Extracts 10 random images from class 1 (KL Grade 1).
+Maps to filenames 51-60.
 Generates a CSV log with ALL columns from the original predictions.csv.
 """
 
@@ -28,16 +27,10 @@ DEST_DIR = os.path.join(BASE_DIR, 'sampled_5')
 NEW_PREDICTIONS_CSV = os.path.join(DEST_DIR, 'predictions.csv')
 
 # Output filename mapping: Class -> List of New Filenames (without extension)
-# 8 images total (2 per class, KL Grade 4 excluded)
-# Class 0 -> 51, 52
-# Class 1 -> 53, 54
-# Class 2 -> 55, 56
-# Class 3 -> 57, 58
+# 10 images total from KL Grade 1
+# Class 1 -> 51 to 60
 CLASS_TO_FILENAMES = {
-    '0': ['51', '52'],
-    '1': ['53', '54'],
-    '2': ['55', '56'],
-    '3': ['57', '58']
+    '1': ['51', '52', '53', '54', '55', '56', '57', '58', '59', '60']
 }
 
 def load_all_predictions() -> Dict[str, List[Dict[str, str]]]:
@@ -60,7 +53,7 @@ def load_all_predictions() -> Dict[str, List[Dict[str, str]]]:
 
 def main():
     print("="*60)
-    print("RANDOM 8 SAMPLING SCRIPT (51-58)")
+    print("RANDOM 10 SAMPLING SCRIPT (Class 1)")
     print("="*60)
 
     # 1. Setup Destination
